@@ -6,9 +6,10 @@ from requests import Session
 from requests.exceptions import RequestException
 
 from .exceptions import SpendeeError
+from .firestore import FirestoreLabelsMixin, SpendeeFirestoreError
 
 
-class Spendee(Session):
+class Spendee(FirestoreLabelsMixin, Session):
     def __init__(self, email: str, password: str, base_url: str = 'https://api.spendee.com/', google_client_id: str = 'AIzaSyCCJPDxVNVFEARQ-LxH7q2aZtdQJGGFO84'):
         """
         :param email: user email to use for login
@@ -1191,7 +1192,8 @@ class Spendee(Session):
     def create_transaction(self, wallet_id: int, category_id: int, amount: float, repeat: str = 'never',
                            reminder: str = 'never', note: str = None, start_date: datetime = None,
                            foreign_currency: str = None, foreign_amount: str = None, foreign_rate: float = 1,
-                           version: str = 'v1.5', url: str = 'wallet-create-transaction', **kwargs):
+                           version: str = 'v1.5', url: str = 'wallet-create-transaction',
+                           labels=None, **kwargs):
         '''
         {
            "wallet_id":4201617,
@@ -1216,6 +1218,13 @@ class Spendee(Session):
         if start_date is None:
             start_date = datetime.datetime.now()
 
+        label_context = None
+        if labels is not None:
+            label_context = self._prepare_legacy_transaction_labels(
+                wallet_id,
+                labels,
+            )
+
         kwargs['json'] = {
            "wallet_id": wallet_id,
            "category_id": category_id,
@@ -1230,4 +1239,30 @@ class Spendee(Session):
            "foreign_amount": foreign_amount,
            "foreign_rate": foreign_rate
         }
-        return self.post(url=url, version=version, **kwargs)
+        result = self.post(url=url, version=version, **kwargs)
+        if label_context is None:
+            return result
+
+        transaction_uuid = self._find_transaction_uuid(result)
+        if transaction_uuid is None:
+            raise SpendeeFirestoreError(
+                "Transaction was created, but the legacy API response did not "
+                "contain its Firestore UUID",
+                response=result,
+            )
+        try:
+            label_result = self._set_transaction_label_ids(
+                label_context["wallet_id"],
+                transaction_uuid,
+                label_context["labels"],
+            )
+        except SpendeeFirestoreError as exc:
+            exc.response = result
+            exc.message = (
+                "Transaction was created, but its labels could not be saved: {}"
+            ).format(exc.message)
+            raise
+
+        if isinstance(result, dict):
+            result["firestore_labels"] = label_result
+        return result
