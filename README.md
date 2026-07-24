@@ -99,3 +99,39 @@ This is a list of all endpoints I've discovered. So far only a subset is impleme
 ## Contributing
 
 If you can improve anything in this repo, feel free to add a pull request or add an issue!
+# Modern labels
+
+Spendee migrated current transactions and labels to the application's
+Firestore database. This fork keeps the original REST API and adds label
+support to the same `Spendee` client:
+
+```python
+from spendee import Spendee
+
+client = Spendee("you@example.com", "password")
+
+labels = client.list_labels()
+transaction = client.create_transaction(
+    wallet_id=123456,
+    category_id=654321,
+    amount=-500,
+    note="Taxi",
+    labels=["такси", "семейное"],
+)
+```
+
+`create_transaction(..., labels=[...])` validates all label names before
+creating the transaction, then atomically writes the modern Firestore label
+relations using the transaction UUID returned by the legacy API.
+
+Existing transactions can be updated with:
+
+```python
+client.set_legacy_transaction_labels(
+    legacy_wallet_id=123456,
+    transaction_uuid="transaction-uuid",
+    labels=["такси"],
+)
+```
+
+Label definitions must already exist in the user's Spendee account.
