@@ -95,19 +95,20 @@ class FakeSpendee(Spendee):
     def _firestore_request(self, method, url, retry_auth=True, **kwargs):
         if url.endswith(":commit"):
             self.commit_payload = kwargs["json"]
+            writes = kwargs["json"].get("writes", [])
+            if (
+                len(writes) == 1
+                and "update" in writes[0]
+                and "/transactions/" in writes[0]["update"]["name"]
+                and "/transactionLabels/" not in writes[0]["update"]["name"]
+            ):
+                self.created_document = writes[0]["update"]
             return Response({"writeResults": []})
-        if method == "POST" and kwargs.get("params", {}).get("documentId"):
-            transaction_id = kwargs["params"]["documentId"]
-            self.created_document = {
-                "name": "{}/transactions/{}".format(
-                    url.replace(
-                        "https://firestore.googleapis.com/v1/",
-                        "",
-                    ),
-                    transaction_id,
-                ),
-                "fields": kwargs["json"]["fields"],
-            }
+        if (
+            method == "GET"
+            and self.created_document is not None
+            and url.endswith(self.created_document["name"])
+        ):
             return Response(self.created_document)
         if method == "GET" and url.endswith("/transactionLabels"):
             return Response({"documents": []})

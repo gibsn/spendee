@@ -423,14 +423,28 @@ class FirestoreLabelsMixin(object):
                 }
             ),
         }
-        response = self._firestore_request(
+        self._firestore_request(
             "POST",
+            "{}:commit".format(self._firestore_documents_url),
+            json={
+                "writes": [
+                    {
+                        "update": {
+                            "name": transaction_name,
+                            "fields": fields,
+                        },
+                        "currentDocument": {"exists": False},
+                    }
+                ]
+            },
+        )
+        response = self._firestore_request(
+            "GET",
             "{}/{}".format(
                 self._firestore_documents_url,
                 transaction_path,
-            ),
-            params={"documentId": transaction_id},
-            json={"fields": fields},
+            )
+            + "/{}".format(transaction_id),
         )
         transaction = _decode_document(response.json())
         expected = {
