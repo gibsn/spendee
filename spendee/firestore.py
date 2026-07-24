@@ -1,5 +1,7 @@
 import base64
+import datetime
 import json
+from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 
 from requests import Session
@@ -204,20 +206,273 @@ class FirestoreLabelsMixin(object):
             for wallet in wallets
         ]
 
-    def resolve_firestore_wallet_id(self, legacy_wallet_id):
-        matches = [
-            wallet["id"]
-            for wallet in self.list_firestore_wallets()
+    def list_firestore_categories(self):
+        """Return modern category UUIDs, including legacy numeric IDs."""
+
+        categories = self._firestore_collection(
+            "users/{}/categories".format(self.firestore_user_id)
+        )
+        return [
+            {
+                "id": category["_id"],
+                "legacy_id": category.get("legacyId"),
+                "name": category.get("name"),
+                "type": category.get("type"),
+                "state": category.get("state"),
+            }
+            for category in categories
+        ]
+
+    def _resolve_firestore_wallet(self, legacy_wallet_id):
+        wallets = self.list_firestore_wallets()
+        direct = [
+            wallet
+            for wallet in wallets
             if wallet.get("legacy_id") == legacy_wallet_id
+        ]
+        if len(direct) == 1:
+            return direct[0]
+        if direct:
+            raise SpendeeFirestoreError(
+                "Expected one Firestore wallet for legacy ID {}, found {}".format(
+                    legacy_wallet_id,
+                    len(direct),
+                )
+            )
+
+        legacy = [
+            wallet
+            for wallet in self.wallet_get_all()
+            if wallet.get("id") == legacy_wallet_id
+        ]
+        if len(legacy) != 1:
+            raise SpendeeFirestoreError(
+                "Expected one legacy wallet for ID {}, found {}".format(
+                    legacy_wallet_id,
+                    len(legacy),
+                )
+            )
+        target = legacy[0]
+        matches = [
+            wallet
+            for wallet in wallets
+            if wallet.get("name") == target.get("name")
+            and wallet.get("currency") == target.get("currency")
+            and wallet.get("status") == target.get("status")
         ]
         if len(matches) != 1:
             raise SpendeeFirestoreError(
-                "Expected one Firestore wallet for legacy ID {}, found {}".format(
+                "Expected one Firestore wallet matching legacy wallet {}, found {}".format(
                     legacy_wallet_id,
                     len(matches),
                 )
             )
         return matches[0]
+
+    def resolve_firestore_wallet_id(self, legacy_wallet_id):
+        return self._resolve_firestore_wallet(legacy_wallet_id)["id"]
+
+    def _resolve_firestore_category(self, legacy_category_id):
+        categories = self.list_firestore_categories()
+        direct = [
+            category
+            for category in categories
+            if category.get("legacy_id") == legacy_category_id
+        ]
+        if len(direct) == 1:
+            return direct[0]
+        if direct:
+            raise SpendeeFirestoreError(
+                "Expected one Firestore category for legacy ID {}, found {}".format(
+                    legacy_category_id,
+                    len(direct),
+                )
+            )
+
+        legacy = [
+            category
+            for category in self.get_all_user_categories()
+            if category.get("id") == legacy_category_id
+        ]
+        if len(legacy) != 1:
+            raise SpendeeFirestoreError(
+                "Expected one legacy category for ID {}, found {}".format(
+                    legacy_category_id,
+                    len(legacy),
+                )
+            )
+        target = legacy[0]
+        matches = [
+            category
+            for category in categories
+            if category.get("name") == target.get("name")
+            and category.get("type") == target.get("type")
+            and category.get("state") in (None, "active")
+        ]
+        if len(matches) != 1:
+            raise SpendeeFirestoreError(
+                "Expected one Firestore category matching legacy category {}, found {}".format(
+                    legacy_category_id,
+                    len(matches),
+                )
+            )
+        return matches[0]
+
+    def resolve_firestore_category_id(self, legacy_category_id):
+        return self._resolve_firestore_category(legacy_category_id)["id"]
+
+    @staticmethod
+    def _decimal_text(value):
+        try:
+            normalized = format(Decimal(str(value)), "f")
+        except InvalidOperation:
+            raise ValueError("amount must be a finite decimal number")
+        if "." in normalized:
+            normalized = normalized.rstrip("0").rstrip(".")
+        return normalized or "0"
+
+    @staticmethod
+    def _timestamp_text(value):
+        return value.astimezone(datetime.timezone.utc).isoformat().replace(
+            "+00:00",
+            "Z",
+        )
+
+    def _usd_exchange_rate(self, currency):
+        payload = self.user_currencies()
+        currencies = payload.get("all", {}).get("currencies", [])
+        matches = [
+            item.get("usd_exchange_rate")
+            for item in currencies
+            if item.get("code") == currency
+        ]
+        if len(matches) != 1 or not matches[0]:
+            raise SpendeeFirestoreError(
+                "Expected one USD exchange rate for {}, found {}".format(
+                    currency,
+                    len(matches),
+                )
+            )
+        return str(matches[0])
+
+    def create_firestore_transaction(
+        self,
+        legacy_wallet_id,
+        legacy_category_id,
+        amount,
+        note=None,
+        made_at=None,
+        timezone_name="UTC",
+        timezone_offset_seconds=0,
+        labels=None,
+        transaction_id=None,
+    ):
+        """Create and verify a transaction in the modern Firestore backend."""
+
+        amount_text = self._decimal_text(amount)
+        if Decimal(amount_text) == 0:
+            raise ValueError("amount must not be zero")
+        if made_at is None:
+            made_at = datetime.datetime.now(datetime.timezone.utc)
+        elif made_at.tzinfo is None:
+            made_at = made_at.replace(
+                tzinfo=datetime.timezone(
+                    datetime.timedelta(seconds=timezone_offset_seconds)
+                )
+            )
+
+        wallet = self._resolve_firestore_wallet(legacy_wallet_id)
+        category = self._resolve_firestore_category(legacy_category_id)
+        transaction_id = str(transaction_id or uuid4())
+        user_id = self.firestore_user_id
+        transaction_path = (
+            "users/{}/wallets/{}/transactions"
+        ).format(user_id, wallet["id"])
+        transaction_name = "{}/{}/{}".format(
+            self._firestore_documents_name,
+            transaction_path,
+            transaction_id,
+        )
+        usd_rate = self._usd_exchange_rate(wallet["currency"])
+        usd_amount = self._decimal_text(
+            Decimal(amount_text) * Decimal(usd_rate)
+        )
+        now = datetime.datetime.now(datetime.timezone.utc)
+        fields = {
+            "modelVersion": _encode_value(1),
+            "type": _encode_value("regular"),
+            "author": _encode_value(user_id),
+            "category": _encode_value(category["id"]),
+            "amount": _encode_value(amount_text),
+            "note": _encode_value(note or ""),
+            "madeAt": {"timestampValue": self._timestamp_text(made_at)},
+            "updatedAt": {"timestampValue": self._timestamp_text(now)},
+            "madeAtTimezone": _encode_value(timezone_name),
+            "madeAtTimezoneOffset": _encode_value(timezone_offset_seconds),
+            "path": _encode_value(
+                {
+                    "user": user_id,
+                    "wallet": wallet["id"],
+                    "transaction": transaction_id,
+                }
+            ),
+            "usdValue": _encode_value(
+                {
+                    "amount": usd_amount,
+                    "exchangeRate": usd_rate,
+                }
+            ),
+        }
+        response = self._firestore_request(
+            "POST",
+            "{}/{}".format(
+                self._firestore_documents_url,
+                transaction_path,
+            ),
+            params={"documentId": transaction_id},
+            json={"fields": fields},
+        )
+        transaction = _decode_document(response.json())
+        expected = {
+            "amount": amount_text,
+            "category": category["id"],
+            "note": note or "",
+        }
+        if any(transaction.get(key) != value for key, value in expected.items()):
+            raise SpendeeFirestoreError(
+                "Firestore transaction readback did not match the request",
+                response=response,
+            )
+
+        label_result = None
+        if labels:
+            try:
+                label_result = self.set_transaction_labels(
+                    wallet["id"],
+                    transaction_id,
+                    labels,
+                )
+            except SpendeeFirestoreError as exc:
+                exc.response = {
+                    "id": transaction_id,
+                    "uuid": transaction_id,
+                    "firestore_wallet_id": wallet["id"],
+                    "firestore_category_id": category["id"],
+                    "firestore_transaction": transaction,
+                }
+                exc.message = (
+                    "Transaction was created, but its labels could not be saved: {}"
+                ).format(exc.message)
+                raise
+
+        return {
+            "id": transaction_id,
+            "uuid": transaction_id,
+            "firestore_wallet_id": wallet["id"],
+            "firestore_category_id": category["id"],
+            "firestore_transaction": transaction,
+            "firestore_labels": label_result,
+        }
 
     def _transaction_labels_path(self, wallet_id, transaction_id):
         return (
