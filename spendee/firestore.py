@@ -397,7 +397,6 @@ class FirestoreLabelsMixin(object):
         usd_amount = self._decimal_text(
             Decimal(amount_text) * Decimal(usd_rate)
         )
-        now = datetime.datetime.now(datetime.timezone.utc)
         fields = {
             "modelVersion": _encode_value(1),
             "type": _encode_value("regular"),
@@ -406,7 +405,6 @@ class FirestoreLabelsMixin(object):
             "amount": _encode_value(amount_text),
             "note": _encode_value(note or ""),
             "madeAt": {"timestampValue": self._timestamp_text(made_at)},
-            "updatedAt": {"timestampValue": self._timestamp_text(now)},
             "madeAtTimezone": _encode_value(timezone_name),
             "madeAtTimezoneOffset": _encode_value(timezone_offset_seconds),
             "path": _encode_value(
@@ -434,6 +432,12 @@ class FirestoreLabelsMixin(object):
                             "fields": fields,
                         },
                         "currentDocument": {"exists": False},
+                        "updateTransforms": [
+                            {
+                                "fieldPath": "updatedAt",
+                                "setToServerValue": "REQUEST_TIME",
+                            }
+                        ],
                     }
                 ]
             },
