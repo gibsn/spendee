@@ -355,6 +355,23 @@ class FirestoreLabelsMixin(object):
             )
         return str(matches[0])
 
+    def get_currency_exchange_rate(self, source_currency, target_currency):
+        """Return target-currency units for one source-currency unit."""
+
+        source = str(source_currency).strip().upper()
+        target = str(target_currency).strip().upper()
+        if not source or not target:
+            raise ValueError("currency codes must not be empty")
+        if source == target:
+            return "1"
+        source_usd_rate = Decimal(self._usd_exchange_rate(source))
+        target_usd_rate = Decimal(self._usd_exchange_rate(target))
+        if source_usd_rate <= 0 or target_usd_rate <= 0:
+            raise SpendeeFirestoreError(
+                "Currency exchange rates must be positive"
+            )
+        return self._decimal_text(source_usd_rate / target_usd_rate)
+
     def create_firestore_transaction(
         self,
         legacy_wallet_id,
@@ -366,6 +383,9 @@ class FirestoreLabelsMixin(object):
         timezone_offset_seconds=0,
         labels=None,
         transaction_id=None,
+        foreign_currency=None,
+        foreign_amount=None,
+        foreign_rate=None,
     ):
         """Create and verify a transaction in the modern Firestore backend."""
 
@@ -383,6 +403,37 @@ class FirestoreLabelsMixin(object):
 
         wallet = self._resolve_firestore_wallet(legacy_wallet_id)
         category = self._resolve_firestore_category(legacy_category_id)
+        custom_currency_value = None
+        foreign_values = (foreign_currency, foreign_amount, foreign_rate)
+        if any(value is not None for value in foreign_values):
+            if not all(value is not None for value in foreign_values):
+                raise ValueError(
+                    "foreign_currency, foreign_amount, and foreign_rate "
+                    "must be provided together"
+                )
+            foreign_currency = str(foreign_currency).strip().upper()
+            if not foreign_currency:
+                raise ValueError("foreign_currency must not be empty")
+            if foreign_currency == wallet["currency"]:
+                raise ValueError(
+                    "foreign_currency must differ from the wallet currency"
+                )
+            foreign_amount_text = self._decimal_text(foreign_amount)
+            foreign_rate_text = self._decimal_text(foreign_rate)
+            if Decimal(foreign_rate_text) <= 0:
+                raise ValueError("foreign_rate must be positive")
+            if (
+                Decimal(amount_text)
+                != Decimal(foreign_amount_text) * Decimal(foreign_rate_text)
+            ):
+                raise ValueError(
+                    "amount must equal foreign_amount multiplied by foreign_rate"
+                )
+            custom_currency_value = {
+                "currency": foreign_currency,
+                "amount": foreign_amount_text,
+                "exchangeRate": foreign_rate_text,
+            }
         transaction_id = str(transaction_id or uuid4())
         user_id = self.firestore_user_id
         transaction_path = (
@@ -421,6 +472,10 @@ class FirestoreLabelsMixin(object):
                 }
             ),
         }
+        if custom_currency_value is not None:
+            fields["customCurrencyValue"] = _encode_value(
+                custom_currency_value
+            )
         self._firestore_request(
             "POST",
             "{}:commit".format(self._firestore_documents_url),
@@ -456,6 +511,8 @@ class FirestoreLabelsMixin(object):
             "category": category["id"],
             "note": note or "",
         }
+        if custom_currency_value is not None:
+            expected["customCurrencyValue"] = custom_currency_value
         if any(transaction.get(key) != value for key, value in expected.items()):
             raise SpendeeFirestoreError(
                 "Firestore transaction readback did not match the request",
