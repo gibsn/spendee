@@ -140,6 +140,10 @@ class FakeSpendee(Spendee):
                     {
                         "code": "RUB",
                         "usd_exchange_rate": "0.0125",
+                    },
+                    {
+                        "code": "THB",
+                        "usd_exchange_rate": "0.025",
                     }
                 ]
             }
@@ -274,6 +278,49 @@ class FirestoreLabelsTest(unittest.TestCase):
 
         self.assertEqual(result["firestore_wallet_id"], "general-wallet-uuid")
         self.assertEqual(result["firestore_category_id"], "music-category-uuid")
+
+    def test_creates_transaction_with_custom_currency_value(self):
+        self.assertEqual(
+            self.client.get_currency_exchange_rate("THB", "RUB"),
+            "2",
+        )
+
+        result = self.client.create_firestore_transaction(
+            legacy_wallet_id=2899807,
+            legacy_category_id=20,
+            amount="-2400",
+            foreign_currency="thb",
+            foreign_amount="-1200",
+            foreign_rate="2",
+            transaction_id="foreign-transaction",
+        )
+
+        self.assertEqual(
+            result["firestore_transaction"]["customCurrencyValue"],
+            {
+                "currency": "THB",
+                "amount": "-1200",
+                "exchangeRate": "2",
+            },
+        )
+        self.assertEqual(
+            result["firestore_transaction"]["usdValue"]["amount"],
+            "-30",
+        )
+
+    def test_rejects_inconsistent_custom_currency_value(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "amount must equal foreign_amount",
+        ):
+            self.client.create_firestore_transaction(
+                legacy_wallet_id=2899807,
+                legacy_category_id=20,
+                amount="-2000",
+                foreign_currency="THB",
+                foreign_amount="-1200",
+                foreign_rate="2",
+            )
 
 
 if __name__ == "__main__":
