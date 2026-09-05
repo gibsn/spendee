@@ -58,13 +58,13 @@ class FakeSpendee(Spendee):
                     "projects/spendee-app/databases/(default)/documents/currencies/RUB",
                     code="RUB",
                     name="Russian ruble",
-                    usdExchangeRate="0.0125",
+                    usdExchangeRate="80",
                 ),
                 document(
                     "projects/spendee-app/databases/(default)/documents/currencies/THB",
                     code="THB",
                     name="Thai baht",
-                    usdExchangeRate="0.025",
+                    usdExchangeRate="40",
                 ),
             ],
             "users/spendee-user/labels": [

@@ -380,13 +380,13 @@ class FirestoreLabelsMixin(object):
             raise ValueError("currency codes must not be empty")
         if source == target:
             return "1"
-        source_usd_rate = Decimal(self._usd_exchange_rate(source))
-        target_usd_rate = Decimal(self._usd_exchange_rate(target))
-        if source_usd_rate <= 0 or target_usd_rate <= 0:
+        source_units_per_usd = Decimal(self._usd_exchange_rate(source))
+        target_units_per_usd = Decimal(self._usd_exchange_rate(target))
+        if source_units_per_usd <= 0 or target_units_per_usd <= 0:
             raise SpendeeFirestoreError(
                 "Currency exchange rates must be positive"
             )
-        return self._decimal_text(source_usd_rate / target_usd_rate)
+        return self._decimal_text(target_units_per_usd / source_units_per_usd)
 
     def create_firestore_transaction(
         self,
@@ -460,9 +460,9 @@ class FirestoreLabelsMixin(object):
             transaction_path,
             transaction_id,
         )
-        usd_rate = self._usd_exchange_rate(wallet["currency"])
+        units_per_usd = self._usd_exchange_rate(wallet["currency"])
         usd_amount = self._decimal_text(
-            Decimal(amount_text) * Decimal(usd_rate)
+            Decimal(amount_text) / Decimal(units_per_usd)
         )
         fields = {
             "modelVersion": _encode_value(1),
@@ -484,7 +484,7 @@ class FirestoreLabelsMixin(object):
             "usdValue": _encode_value(
                 {
                     "amount": usd_amount,
-                    "exchangeRate": usd_rate,
+                    "exchangeRate": units_per_usd,
                 }
             ),
         }
