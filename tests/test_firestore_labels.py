@@ -84,6 +84,12 @@ class FakeSpendee(Spendee):
                     legacyId=20,
                     type="expense",
                     state="active",
+                ),
+                document(
+                    "{}/categories/music-category-uuid".format(root),
+                    name="Музыка",
+                    type="expense",
+                    state="active",
                 )
             ],
             (
@@ -168,6 +174,16 @@ class FirestoreLabelsTest(unittest.TestCase):
             "general-wallet-uuid",
         )
 
+    def test_resolves_firestore_wallet_and_category_ids_directly(self):
+        self.assertEqual(
+            self.client.resolve_firestore_wallet_id("general-wallet-uuid"),
+            "general-wallet-uuid",
+        )
+        self.assertEqual(
+            self.client.resolve_firestore_category_id("music-category-uuid"),
+            "music-category-uuid",
+        )
+
     def test_create_transaction_validates_and_writes_labels(self):
         result = self.client.create_transaction(
             wallet_id=2899807,
@@ -246,6 +262,18 @@ class FirestoreLabelsTest(unittest.TestCase):
             result["firestore_labels"]["labels"],
             ["такси"],
         )
+
+    def test_creates_transaction_with_firestore_only_wallet_and_category(self):
+        result = self.client.create_firestore_transaction(
+            legacy_wallet_id="general-wallet-uuid",
+            legacy_category_id="music-category-uuid",
+            amount=-1000,
+            note="Music",
+            transaction_id="modern-only-transaction",
+        )
+
+        self.assertEqual(result["firestore_wallet_id"], "general-wallet-uuid")
+        self.assertEqual(result["firestore_category_id"], "music-category-uuid")
 
 
 if __name__ == "__main__":

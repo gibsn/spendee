@@ -223,19 +223,20 @@ class FirestoreLabelsMixin(object):
             for category in categories
         ]
 
-    def _resolve_firestore_wallet(self, legacy_wallet_id):
+    def _resolve_firestore_wallet(self, wallet_id):
         wallets = self.list_firestore_wallets()
         direct = [
             wallet
             for wallet in wallets
-            if wallet.get("legacy_id") == legacy_wallet_id
+            if wallet.get("id") == wallet_id
+            or wallet.get("legacy_id") == wallet_id
         ]
         if len(direct) == 1:
             return direct[0]
         if direct:
             raise SpendeeFirestoreError(
-                "Expected one Firestore wallet for legacy ID {}, found {}".format(
-                    legacy_wallet_id,
+                "Expected one Firestore wallet for ID {}, found {}".format(
+                    wallet_id,
                     len(direct),
                 )
             )
@@ -243,12 +244,12 @@ class FirestoreLabelsMixin(object):
         legacy = [
             wallet
             for wallet in self.wallet_get_all()
-            if wallet.get("id") == legacy_wallet_id
+            if wallet.get("id") == wallet_id
         ]
         if len(legacy) != 1:
             raise SpendeeFirestoreError(
                 "Expected one legacy wallet for ID {}, found {}".format(
-                    legacy_wallet_id,
+                    wallet_id,
                     len(legacy),
                 )
             )
@@ -263,7 +264,7 @@ class FirestoreLabelsMixin(object):
         if len(matches) != 1:
             raise SpendeeFirestoreError(
                 "Expected one Firestore wallet matching legacy wallet {}, found {}".format(
-                    legacy_wallet_id,
+                    wallet_id,
                     len(matches),
                 )
             )
@@ -272,19 +273,20 @@ class FirestoreLabelsMixin(object):
     def resolve_firestore_wallet_id(self, legacy_wallet_id):
         return self._resolve_firestore_wallet(legacy_wallet_id)["id"]
 
-    def _resolve_firestore_category(self, legacy_category_id):
+    def _resolve_firestore_category(self, category_id):
         categories = self.list_firestore_categories()
         direct = [
             category
             for category in categories
-            if category.get("legacy_id") == legacy_category_id
+            if category.get("id") == category_id
+            or category.get("legacy_id") == category_id
         ]
         if len(direct) == 1:
             return direct[0]
         if direct:
             raise SpendeeFirestoreError(
-                "Expected one Firestore category for legacy ID {}, found {}".format(
-                    legacy_category_id,
+                "Expected one Firestore category for ID {}, found {}".format(
+                    category_id,
                     len(direct),
                 )
             )
@@ -292,12 +294,12 @@ class FirestoreLabelsMixin(object):
         legacy = [
             category
             for category in self.get_all_user_categories()
-            if category.get("id") == legacy_category_id
+            if category.get("id") == category_id
         ]
         if len(legacy) != 1:
             raise SpendeeFirestoreError(
                 "Expected one legacy category for ID {}, found {}".format(
-                    legacy_category_id,
+                    category_id,
                     len(legacy),
                 )
             )
@@ -312,7 +314,7 @@ class FirestoreLabelsMixin(object):
         if len(matches) != 1:
             raise SpendeeFirestoreError(
                 "Expected one Firestore category matching legacy category {}, found {}".format(
-                    legacy_category_id,
+                    category_id,
                     len(matches),
                 )
             )
