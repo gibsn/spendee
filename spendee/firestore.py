@@ -223,6 +223,21 @@ class FirestoreLabelsMixin(object):
             for category in categories
         ]
 
+    def list_firestore_currencies(self):
+        """Return currencies and USD exchange rates from Firestore."""
+
+        currencies = self._firestore_collection("currencies")
+        return [
+            {
+                "code": currency.get("code") or currency["_id"],
+                "name": currency.get("name"),
+                "decimal_digits": currency.get("decimalDigits"),
+                "replaced_by": currency.get("replacedBy"),
+                "usd_exchange_rate": currency.get("usdExchangeRate"),
+            }
+            for currency in currencies
+        ]
+
     def _resolve_firestore_wallet(self, wallet_id):
         wallets = self.list_firestore_wallets()
         direct = [
@@ -341,8 +356,7 @@ class FirestoreLabelsMixin(object):
         )
 
     def _usd_exchange_rate(self, currency):
-        payload = self.user_currencies()
-        currencies = payload.get("all", {}).get("currencies", [])
+        currencies = self.list_firestore_currencies()
         matches = [
             item.get("usd_exchange_rate")
             for item in currencies

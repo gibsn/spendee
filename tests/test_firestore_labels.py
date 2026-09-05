@@ -45,6 +45,7 @@ class FakeSpendee(Spendee):
             }
         )
         self.rest_calls = []
+        self.legacy_currency_calls = 0
         self.commit_payload = None
         self.created_document = None
         root = (
@@ -52,6 +53,20 @@ class FakeSpendee(Spendee):
             "users/spendee-user"
         )
         self.collections = {
+            "currencies": [
+                document(
+                    "projects/spendee-app/databases/(default)/documents/currencies/RUB",
+                    code="RUB",
+                    name="Russian ruble",
+                    usdExchangeRate="0.0125",
+                ),
+                document(
+                    "projects/spendee-app/databases/(default)/documents/currencies/THB",
+                    code="THB",
+                    name="Thai baht",
+                    usdExchangeRate="0.025",
+                ),
+            ],
             "users/spendee-user/labels": [
                 document(
                     "{}/labels/taxi-id".format(root),
@@ -134,6 +149,7 @@ class FakeSpendee(Spendee):
         return {"id": 99, "uuid": "transaction-uuid"}
 
     def user_currencies(self):
+        self.legacy_currency_calls += 1
         return {
             "all": {
                 "currencies": [
@@ -187,6 +203,13 @@ class FirestoreLabelsTest(unittest.TestCase):
             self.client.resolve_firestore_category_id("music-category-uuid"),
             "music-category-uuid",
         )
+
+    def test_exchange_rates_use_firestore_currency_collection(self):
+        self.assertEqual(
+            self.client.get_currency_exchange_rate("THB", "RUB"),
+            "2",
+        )
+        self.assertEqual(self.client.legacy_currency_calls, 0)
 
     def test_create_transaction_validates_and_writes_labels(self):
         result = self.client.create_transaction(
