@@ -349,6 +349,16 @@ class FirestoreLabelsMixin(object):
         return normalized or "0"
 
     @staticmethod
+    def _same_currency_amount(left, right):
+        try:
+            minor_unit = Decimal("0.01")
+            return Decimal(str(left)).quantize(minor_unit) == Decimal(
+                str(right)
+            ).quantize(minor_unit)
+        except (InvalidOperation, TypeError, ValueError):
+            return False
+
+    @staticmethod
     def _timestamp_text(value):
         return value.astimezone(datetime.timezone.utc).isoformat().replace(
             "+00:00",
@@ -523,13 +533,15 @@ class FirestoreLabelsMixin(object):
         )
         transaction = _decode_document(response.json())
         expected = {
-            "amount": amount_text,
             "category": category["id"],
             "note": note or "",
         }
         if custom_currency_value is not None:
             expected["customCurrencyValue"] = custom_currency_value
-        if any(transaction.get(key) != value for key, value in expected.items()):
+        if (
+            not self._same_currency_amount(transaction.get("amount"), amount_text)
+            or any(transaction.get(key) != value for key, value in expected.items())
+        ):
             raise SpendeeFirestoreError(
                 "Firestore transaction readback did not match the request",
                 response=response,

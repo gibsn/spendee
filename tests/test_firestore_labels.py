@@ -1,4 +1,5 @@
 import base64
+import copy
 import datetime
 import json
 import unittest
@@ -48,6 +49,7 @@ class FakeSpendee(Spendee):
         self.legacy_currency_calls = 0
         self.commit_payload = None
         self.created_document = None
+        self.readback_amount = None
         root = (
             "projects/spendee-app/databases/(default)/documents/"
             "users/spendee-user"
@@ -130,7 +132,12 @@ class FakeSpendee(Spendee):
             and self.created_document is not None
             and url.endswith(self.created_document["name"])
         ):
-            return Response(self.created_document)
+            created_document = copy.deepcopy(self.created_document)
+            if self.readback_amount is not None:
+                created_document["fields"]["amount"] = {
+                    "doubleValue": self.readback_amount,
+                }
+            return Response(created_document)
         if method == "GET" and url.endswith("/transactionLabels"):
             return Response({"documents": []})
         for suffix, documents in self.collections.items():
@@ -330,6 +337,21 @@ class FirestoreLabelsTest(unittest.TestCase):
             result["firestore_transaction"]["usdValue"]["amount"],
             "-30",
         )
+
+    def test_accepts_firestore_rounding_in_transaction_readback(self):
+        self.client.readback_amount = -798.18363191
+
+        result = self.client.create_firestore_transaction(
+            legacy_wallet_id=2899807,
+            legacy_category_id=20,
+            amount="-798.1836319403183",
+            note="Red Lion - Mayfair",
+            labels=["такси"],
+            transaction_id="rounded-transaction",
+        )
+
+        self.assertEqual(result["uuid"], "rounded-transaction")
+        self.assertEqual(result["firestore_labels"]["labels"], ["такси"])
 
     def test_rejects_inconsistent_custom_currency_value(self):
         with self.assertRaisesRegex(
